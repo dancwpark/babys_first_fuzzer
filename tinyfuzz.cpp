@@ -55,6 +55,7 @@ int main(int argc, char **argv) {
       inputfile.close();
     }
   }
+
   // No threading yet
   //int threads = 2;
   //for (int i = 0; i < threads; ++i) {
