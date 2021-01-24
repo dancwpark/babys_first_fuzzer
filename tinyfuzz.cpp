@@ -1,4 +1,5 @@
 #include <cstdlib>
+#include <sys/wait.h>
 #include <time.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -17,15 +18,52 @@
 // The plan is not to make this have great perf. or 
 //  a great mutation engine.
 
-
+int crashes = 0;
+int fcs = 0;
 typedef unsigned char BYTE;
+
+void fuzz(char *arg0, char** args) {
+  int ret;
+  pid_t thr_id = fork();
+ 
+  if (thr_id == 0) {
+    // we are in child
+    int fd = open("/dev/null", O_WRONLY);
+    dup2(fd, 1);
+    dup2(fd, 2);
+    close(fd);
+    execvp(arg0, args);
+    fprintf(stderr, "ERROR! execvp failed\n");
+  } else {
+    // We are in parent
+    fcs++;
+    do {
+      pid_t cpid = waitpid(thr_id, &ret, WUNTRACED | WCONTINUED);
+      if (cpid == -1) {
+        fprintf(stderr, "waitpid failed\n");
+        perror("waitpid");
+      }
+      if (WIFEXITED(ret)) {
+        // pass
+      } else if (WIFSIGNALED(ret)) {
+        // a crash
+        crashes++;
+        int exit_status = WTERMSIG(ret);
+      } else if (WIFSTOPPED(ret)) {
+        // pass
+      } else if (WIFCONTINUED(ret)) {
+        // pass
+      }
+    } while (!WIFEXITED(ret) && !WIFSIGNALED(ret));
+  }
+}
 
 /// Only changes a byte
 void mutate(char *input, char *mutated_str) {
   // Change a byte
   BYTE output[strlen(input)+1];
   output[strlen(input)] = 0;
-  std::cout << input << std::endl;
+  //std::cout << input << std::endl;
   for (int i = 0; i < strlen(input); ++i) {
     output[i] = input[i];
   }
@@ -36,6 +74,10 @@ void mutate(char *input, char *mutated_str) {
   for (int i = 0; i < strlen(input) + 1; ++i) {
     mutated_str[i] = (char) output[i];
   }
+}
+
+void add_byte(char *input, char *mutated_str) {
+
 }
 
 int main(int argc, char **argv) {
@@ -80,26 +122,23 @@ int main(int argc, char **argv) {
     }
   }
 
-  // No threading yet
-  //int threads = 2;
-  //for (int i = 0; i < threads; ++i) {
-  //  
-  //}
-  
   // Just run inputs through the program!
   std::cout << "Dumb fuzzing time" << std::endl;
+  time_t start = time(NULL);
+
+  while (true) {
   for (int i = 0; i < inputs.size(); ++i) {
     std::string command = "./" + std::string(program_name);
-    char arg1[inputs[i].size()+1];
+    char arg1[500];
     mutate(const_cast<char *>(inputs[i].c_str()), arg1);
-    std::cout << arg1 << std::endl << std::endl;
     char *arg0 = const_cast<char *>(command.c_str());
     char * args[]  = {arg0, arg1, nullptr};
-   
-
-    int ret = execvp(arg0, args);
-    // Shouldn't return so only one thing will run
-    std::cout << ret << std::endl; 
+  
+    fuzz(arg0, args);
+    time_t elapsed = time(NULL) - start;
+    float fcps = (float) fcs / float(elapsed);
+    printf("FCPS: %f\tCrashes: %d\t\n", fcps, crashes);
+  }
   }
 
   
